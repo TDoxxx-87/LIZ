@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="utf-8" />
+  <title>Fusion – Overlay-Vergleich + DGM (normal, transparent)</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <!-- Leaflet -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+  <style>
+    html, body, #map { height: 100%; margin: 0; }
+    .top-controls {
+      position: absolute; top: 12px; right: 12px; z-index: 1000;
+      background: rgba(255,255,255,.92); backdrop-filter: blur(4px);
+      border-radius: 10px; box-shadow: 0 2px 12px rgba(0,0,0,.15);
+      padding: 10px 12px; max-width: 380px;
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+    }
+    .row { display: flex; align-items: center; gap: 8px; margin: 6px 0; }
+    .row label { font-size: 12px; white-space: nowrap; }
+    .row input[type="range"] { flex: 1; }
+    .toggle-wrap { margin-top: 6px; font-size: 13px; display:flex; align-items:center; gap:8px; }
+
+    .bottom-bar {
+      position: absolute; left: 50%; transform: translateX(-50%);
+      bottom: 14px; z-index: 1000;
+      display: grid; grid-template-columns: 1fr auto 1fr; gap: 10px; align-items: center;
+      background: rgba(255,255,255,.92); backdrop-filter: blur(4px);
+      border-radius: 12px; box-shadow: 0 2px 12px rgba(0,0,0,.18);
+      padding: 10px 12px; width: min(94vw, 880px);
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+    }
+    .select-wrap { display: flex; flex-direction: column; gap: 4px; }
+    select, input[type="range"] { font-size: 14px; padding: 6px 8px; border: 1px solid #ddd; border-radius: 8px; background: #fff; outline: none; }
+    .center-control { display: flex; flex-direction: column; align-items: center; gap: 4px; min-width: 240px; }
+    @media (max-width: 640px) {
+      .bottom-bar { grid-template-columns: 1fr; gap: 8px; }
+      .center-control { min-width: 0; }
+    }
+  </style>
+
+  <!-- *** WICHTIG: Diese Zeile muss im qgis2web-Ordner die GeoJSON-Variable laden *** -->
+  <script src="data/BRB_denkmalbb_bodendenkmalflchen_1.js"></script>
+</head>
+<body>
+  <div id="map"></div>
+
+  <!-- Oben rechts: DGM-Schieber + Feature-Toggle -->
+  <div class="top-controls">
+    <h3 style="margin:0 0 6px 0; font-size:14px;">DGM (normal) – Transparenz</h3>
+    <div class="row">
+      <label for="dgmRange">DGM-Deckkraft</label>
+      <input id="dgmRange" type="range" min="0" max="1" step="0.01" value="0.0">
+      <span id="dgmVal" style="min-width:38px;text-align:right;font-size:12px;">0%</span>
+    </div>
+    <div class="toggle-wrap">
+      <input type="checkbox" id="chkFeat" checked>
+      <label for="chkFeat" title="Bodendenkmale (GeoJSON) als separates Overlay">Bodendenkmale anzeigen</label>
+    </div>
+  </div>
+
+  <!-- Unten Mitte: Overlay A/B + globaler Schieber -->
+  <div class="bottom-bar">
+    <div class="select-wrap">
+      <label for="selA">Overlay A (Referenz, 100%)</label>
+      <select id="selA"></select>
+    </div>
+    <div class="center-control">
+      <span>Deckkraft Overlay B</span>
+      <input id="globalOpacity" type="range" min="0" max="1" step="0.01" value="0.6" />
+    </div>
+    <div class="select-wrap">
+      <label for="selB">Overlay B (gesteuert)</label>
+      <select id="selB"></select>
+    </div>
+  </div>
+
+<script>
+/* ========== Dienste-Liste wie in deiner meine_karte.html ========== */
+const wmsServices = [
+  { n: "bDOM 2020-2022",                   u: "https://isk.geobasis-bb.de/mapproxy/bdom20202022/service/wms?" },
+  { n: "bDOM 2017-2019",                   u: "https://isk.geobasis-bb.de/mapproxy/bdom20172019/service/wms?" },
+  { n: "DGM (aktuell)",                    u: "https://isk.geobasis-bb.de/mapproxy/dgm/service/wms?" },   // <- DGM
+  { n: "DOP20 rgbi 2019-2021",             u: "https://isk.geobasis-bb.de/mapproxy/dop20_2019_2021/service/wms?" },
+  { n: "DOP20 rgbi 2016-2018",             u: "https://isk.geobasis-bb.de/mapproxy/dop20_2016_2018/service/wms?" },
+  { n: "DOP20 rgbi 2013-2015",             u: "https://isk.geobasis-bb.de/mapproxy/dop20_2013_2015/service/wms?" },
+  { n: "DOP20 rgbi 2009-2012",             u: "https://isk.geobasis-bb.de/mapproxy/dop20_2009_2012/service/wms?" },
+  { n: "DOP20 c 2005-2010",                u: "https://isk.geobasis-bb.de/mapproxy/dop20_2005_2010/service/wms?" },
+  { n: "DOP40 g 2001-2009",                u: "https://isk.geobasis-bb.de/mapproxy/dop40g_2001_2009/service/wms?" },
+  { n: "DOP50 g 1992-1997",                u: "https://isk.geobasis-bb.de/mapproxy/dop50g_1992_1997/service/wms?" },
+  { n: "DOP100 g 2001-2005",               u: "https://isk.geobasis-bb.de/mapproxy/dop100g_2001_2005/service/wms?" },
+  { n: "DOP100 g 1953",                    u: "https://isk.geobasis-bb.de/mapproxy/dop100g_1953/service/wms?" },
+  { n: "DTK10 1986-2000",                  u: "https://isk.geobasis-bb.de/mapproxy/dtk10farbe/service/wms?" },
+  { n: "DTK25 1989-1999",                  u: "https://isk.geobasis-bb.de/mapproxy/dtk25farbe/service/wms?" },
+  { n: "DTSK25 1990-2001",                 u: "https://isk.geobasis-bb.de/mapproxy/dtsk25_1990_2001/service/wms?" },
+  { n: "DTK50 1993-2005",                  u: "https://isk.geobasis-bb.de/mapproxy/dtk50farbe/service/wms?" },
+  { n: "DTK100 1987-2004",                 u: "https://isk.geobasis-bb.de/mapproxy/dtk100farbe/service/wms?" },
+  { n: "Schmettausches Kartenwerk 1767-1787", u: "https://isk.geobasis-bb.de/mapproxy/schmettau/service/wms?" }
+];
+
+/* ========== Leaflet-Karte ========== */
+const map = L.map('map', { zoomControl:true }).setView([52.5,13.3], 8);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {maxZoom:19, attribution:'© OpenStreetMap-Mitwirkende'}).addTo(map);
+
+/* Panes (nur zur Ordnung) */
+map.createPane('overlayA');
+map.createPane('overlayB');
+map.createPane('dgmPane'); // keine Spezial-Filter mehr – normales Rendern
+
+/* UI-Refs */
+const selA = document.getElementById('selA');
+const selB = document.getElementById('selB');
+const globalOpacity = document.getElementById('globalOpacity');
+const dgmRange = document.getElementById('dgmRange');
+const dgmVal = document.getElementById('dgmVal');
+const chkFeat = document.getElementById('chkFeat');
+
+/* Container */
+const layers = Object.create(null);
+let dgmLayer = null;
+let featLayer = null;
+
+/* ===== Feature-Layer (GeoJSON aus qgis2web) ===== */
+function styleFeat() { return { color:'rgba(255,195,0,1.0)', weight:1, opacity:1, fillOpacity:0 }; }
+function popFeat(feature, layer) {
+  const p = feature && feature.properties || {};
+  let html = '<table>';
+  for (const k in p) { if (!Object.prototype.hasOwnProperty.call(p,k)) continue; html += `<tr><td><b>${k}</b></td><td>${p[k]}</td></tr>`; }
+  html += '</table>';
+  layer.bindPopup(html, {maxHeight:400});
+}
+
+try {
+  // Variable kommt aus data/BRB_denkmalbb_bodendenkmalflchen_1.js
+  if (typeof json_BRB_denkmalbb_bodendenkmalflchen_1 !== 'undefined') {
+    featLayer = L.geoJSON(json_BRB_denkmalbb_bodendenkmalflchen_1, { style: styleFeat, onEachFeature: popFeat, pane:'overlayA' }).addTo(map);
+    layers['Bodendenkmale (BRB)'] = { tile: featLayer };
+    // Auf Feature-Ausdehnung zoomen (nur beim ersten Laden):
+    try { map.fitBounds(featLayer.getBounds(), { padding:[20,20] }); } catch(e) {}
+  } else {
+    console.warn('GeoJSON-Variable json_BRB_denkmalbb_bodendenkmalflchen_1 nicht gefunden – prüfe data/-Pfad.');
+  }
+} catch (e) {
+  console.warn('Feature-Layer Fehler:', e);
+}
+
+/* Checkbox für Feature-Layer */
+chkFeat.addEventListener('change', () => {
+  if (!featLayer) return;
+  if (chkFeat.checked) featLayer.addTo(map);
+  else map.removeLayer(featLayer);
+});
+
+/* ===== WMS Utility: ersten Layernamen holen ===== */
+async function fetchFirstLayerName(baseUrl) {
+  try {
+    const url = `${baseUrl}${baseUrl.includes('?') ? '' : '?'}service=WMS&request=GetCapabilities&version=1.3.0`;
+    const xml = await (await fetch(url)).text();
+    const doc = new DOMParser().parseFromString(xml, 'text/xml');
+    const node = doc.querySelector('Layer > Name');
+    return node ? node.textContent.trim() : null;
+  } catch(e) {
+    console.warn('GetCapabilities fehlgeschlagen:', baseUrl, e);
+    return null;
+  }
+}
+
+/* ===== Dropdown-Helfer ===== */
+function addOption(select, name) {
+  const opt = document.createElement('option');
+  opt.value = name; opt.textContent = name;
+  select.appendChild(opt);
+}
+function fillSelects(names) {
+  function setup(select) {
+    select.innerHTML = '';
+    const none = document.createElement('option'); none.value='__none__'; none.textContent='— kein —';
+    select.appendChild(none);
+    names.forEach(n => { if(n!=='DGM (aktuell)') addOption(select, n); });
+  }
+  setup(selA); setup(selB);
+}
+
+/* ===== Sichtbarkeit & Opazitäten ===== */
+function updateOverlayVisibility() {
+  const a = selA.value, b = selB.value;
+  Object.values(layers).forEach(o => o.tile && o.tile.setOpacity && o.tile.setOpacity(0));
+  if (a && a!=='__none__' && layers[a] && layers[a].tile.setOpacity) layers[a].tile.setOpacity(1);                 // A immer 100%
+  if (b && b!=='__none__' && layers[b] && layers[b].tile.setOpacity) layers[b].tile.setOpacity(parseFloat(globalOpacity.value)); // B über Schieber
+}
+
+/* ===== DGM normal (ohne Multiply): Opacity direkt steuern ===== */
+function applyDgmOpacity() {
+  const t = parseFloat(dgmRange.value);
+  dgmVal.textContent = Math.round(t*100) + '%';
+  if (dgmLayer && dgmLayer.setOpacity) dgmLayer.setOpacity(t);
+}
+
+/* ===== Init: WMS-Layer laden ===== */
+(async () => {
+  const names = Object.keys(layers); // Startet ggf. mit "Bodendenkmale (BRB)"
+
+  for (const svc of wmsServices) {
+    const lname = await fetchFirstLayerName(svc.u);
+    if (!lname) continue;
+
+    if (svc.n === 'DGM (aktuell)') {
+      dgmLayer = L.tileLayer.wms(svc.u, { layers: lname, format:'image/png', transparent:true, opacity:0.0, pane:'dgmPane' }).addTo(map);
+      names.push(svc.n);
+      continue;
+    }
+
+    const tile = L.tileLayer.wms(svc.u, { layers: lname, format:'image/png', transparent:true, opacity:0, pane:'overlayA' }).addTo(map);
+    layers[svc.n] = { tile };
+    names.push(svc.n);
+  }
+
+  // Dropdowns befüllen
+  fillSelects(names.length ? names : ['Bodendenkmale (BRB)']);
+
+  // Defaults setzen
+  if ([...selA.options].some(o => o.value==='Bodendenkmale (BRB)')) selA.value = 'Bodendenkmale (BRB)';
+  const defB = 'bDOM 2020-2022';
+  if ([...selB.options].some(o => o.value===defB)) selB.value = defB;
+
+  updateOverlayVisibility();
+  applyDgmOpacity();
+})();
+
+/* ===== Events ===== */
+selA.addEventListener('change', () => { if (selB.value === selA.value) selB.value = '__none__'; updateOverlayVisibility(); });
+
+selB.addEventListener('change', () => {
+  // B in eigenes Pane heben (damit es über A liegt)
+  for (const n in layers) {
+    const Lr = layers[n].tile;
+    if (Lr && Lr.options) { Lr.options.pane = 'overlayA'; if (Lr.setZIndex) Lr.setZIndex(350); }
+  }
+  const b = selB.value;
+  if (b && b!=='__none__' && layers[b] && layers[b].tile) {
+    layers[b].tile.options.pane = 'overlayB';
+    if (layers[b].tile.setZIndex) layers[b].tile.setZIndex(360);
+    if (map.hasLayer(layers[b].tile)) { map.removeLayer(layers[b].tile); }
+    layers[b].tile.addTo(map);
+  }
+  updateOverlayVisibility();
+});
+
+globalOpacity.addEventListener('input', updateOverlayVisibility);
+dgmRange.addEventListener('input', applyDgmOpacity);
+</script>
+</body>
+</html>
