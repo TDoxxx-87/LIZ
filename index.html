@@ -81,6 +81,7 @@
 /* ========== Dienste-Liste wie in deiner meine_karte.html ========== */
 const wmsServices = [
   { n: "bDOM 2020-2022",                   u: "https://isk.geobasis-bb.de/mapproxy/bdom20202022/service/wms?" },
+  { n: "Preußen_1877",                   u: "https://isk.geobasis-bb.de/mapproxy/dr25/service/wms?" },
   { n: "bDOM 2017-2019",                   u: "https://isk.geobasis-bb.de/mapproxy/bdom20172019/service/wms?" },
   { n: "DGM (aktuell)",                    u: "https://isk.geobasis-bb.de/mapproxy/dgm/service/wms?" },   // <- DGM
   { n: "DOP20 rgbi 2019-2021",             u: "https://isk.geobasis-bb.de/mapproxy/dop20_2019_2021/service/wms?" },
@@ -98,7 +99,7 @@ const wmsServices = [
   { n: "DTK50 1993-2005",                  u: "https://isk.geobasis-bb.de/mapproxy/dtk50farbe/service/wms?" },
   { n: "DTK100 1987-2004",                 u: "https://isk.geobasis-bb.de/mapproxy/dtk100farbe/service/wms?" },
   { n: "Schmettausches Kartenwerk 1767-1787", u: "https://isk.geobasis-bb.de/mapproxy/schmettau/service/wms?" }
-];
+ ];
 
 /* ========== Leaflet-Karte ========== */
 const map = L.map('map', { zoomControl:true }).setView([52.5,13.3], 8);
