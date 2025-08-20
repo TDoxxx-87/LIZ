@@ -2,7 +2,7 @@
 <html lang="de">
 <head>
   <meta charset="utf-8" />
-  <title>Fusion – Lazy WMS (nur A/B), Mobile UI, CORS-frei</title>
+  <title>Fusion – Lazy WMS (nur A/B), Mobile UI, DGM-Überhöhung</title>
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 
   <!-- Leaflet -->
@@ -79,11 +79,16 @@
     <div class="sheet__inner">
       <div class="grid">
         <div class="card">
-          <h3>DGM (normal) – Transparenz</h3>
+          <h3>DGM (normal) – Transparenz & Überhöhung</h3>
           <div class="row">
             <label for="dgmRange">Deckkraft</label>
             <input id="dgmRange" type="range" min="0" max="1" step="0.01" value="0.4">
             <span id="dgmVal" style="font-size:12px;">40%</span>
+          </div>
+          <div class="row">
+            <label for="dgmExag">Überhöhung</label>
+            <input id="dgmExag" type="range" min="1" max="5" step="0.1" value="1">
+            <span id="dgmExagVal" style="font-size:12px;">×1.0</span>
           </div>
           <label class="toggle" style="margin-top:8px;">
             <input type="checkbox" id="chkFeat" checked>
@@ -143,6 +148,8 @@ const selB = document.getElementById('selB');
 const globalOpacity = document.getElementById('globalOpacity');
 const dgmRange = document.getElementById('dgmRange');
 const dgmVal = document.getElementById('dgmVal');
+const dgmExag = document.getElementById('dgmExag');
+const dgmExagVal = document.getElementById('dgmExagVal');
 const chkFeat = document.getElementById('chkFeat');
 
 /* Sheet/FAB */
@@ -187,16 +194,34 @@ chkFeat.addEventListener('change', () => {
 /* ===== DGM laden (einmalig) ===== */
 (function initDGM(){
   const svc = { u: "https://isk.geobasis-bb.de/mapproxy/dgm/service/wms?", layer: "dgm" };
-  dgmLayer = L.tileLayer.wms(svc.u, { layers: svc.layer, format:'image/png', transparent:true, opacity: parseFloat(dgmRange.value)||0, pane:'dgmPane', version:'1.1.1', crossOrigin:false })
-    .addTo(map)
-    .on('tileerror', (e)=>console.warn('DGM tileerror', e));
+  dgmLayer = L.tileLayer.wms(svc.u, {
+    layers: svc.layer, format:'image/png', transparent:true,
+    opacity: parseFloat(dgmRange.value)||0, pane:'dgmPane',
+    version:'1.1.1', crossOrigin:false
+  })
+  .addTo(map)
+  .on('tileerror', (e)=>console.warn('DGM tileerror', e));
 })();
-function applyDgmOpacity() {
+function applyDgmLook() {
+  // Opazität
   const t = parseFloat(dgmRange.value);
   dgmVal.textContent = Math.round(t*100) + '%';
   if (dgmLayer && dgmLayer.setOpacity) dgmLayer.setOpacity(t);
+
+  // „Überhöhung“ (optisch): Kontrast ↑, Helligkeit ↓
+  // k=1 → neutral (contrast(1) brightness(1))
+  // k=3 → deutlich betont; Feintuning: contrast 1 + 0.35*(k-1), brightness 1 - 0.07*(k-1)
+  const k = parseFloat(dgmExag.value);
+  dgmExagVal.textContent = '×' + k.toFixed(1);
+  const contrast = (1 + 0.35*(k-1)).toFixed(3);
+  const brightness = Math.max(0.5, (1 - 0.07*(k-1))).toFixed(3);
+  const pane = map.getPane('dgmPane');
+  if (pane) {
+    pane.style.filter = `contrast(${contrast}) brightness(${brightness})`;
+  }
 }
-dgmRange.addEventListener('input', applyDgmOpacity);
+dgmRange.addEventListener('input', applyDgmLook);
+dgmExag.addEventListener('input', applyDgmLook);
 
 /* ===== Dropdowns – sofort befüllen (keine Netz-Abhängigkeit) ===== */
 function addOption(select, name) {
@@ -230,8 +255,11 @@ function loadWms(name, pane) {
     }
     return t;
   }
-  const t = L.tileLayer.wms(svc.u, { layers: svc.layer, format:'image/png', transparent:true, opacity:0, pane, version:'1.1.1', crossOrigin:false })
-    .on('tileerror', (e)=>console.warn('WMS tileerror', svc, e));
+  const t = L.tileLayer.wms(svc.u, {
+    layers: svc.layer, format:'image/png', transparent:true, opacity:0, pane,
+    version:'1.1.1', crossOrigin:false
+  })
+  .on('tileerror', (e)=>console.warn('WMS tileerror', svc, e));
   t.addTo(map);
   cache[name] = t;
   return t;
@@ -283,18 +311,18 @@ globalOpacity.addEventListener('input', () => {
   fillSelects();
 
   // Defaults (nur Auswahl setzen – Laden macht updateAandB)
-  const defA = "DOP20 2019–2021 (Farbe)";
-  const defB = "DOP20 2016–2018 (Farbe)";
+  const defA = "DOP20 2019–2021 (Grau)";       // sehr guter Kontrast unter DGM
+  const defB = "2016-2018";
   if ([...selA.options].some(o => o.value===defA)) selA.value = defA;
   if ([...selB.options].some(o => o.value===defB)) selB.value = defB;
 
-  applyDgmOpacity();   // DGM initial
-  updateAandB();      // lädt genau 2 Layer: A & B
+  applyDgmLook();   // DGM: Opazität + Überhöhungsfilter initial anwenden
+  updateAandB();    // lädt genau 2 Layer: A & B
 
   // Mobile UX: Sheet bei erstem Fokus öffnen
   const isNarrow = window.matchMedia('(max-width: 820px)').matches;
   if (isNarrow) {
-    [selA, selB, globalOpacity, dgmRange, chkFeat].forEach(el=>{
+    [selA, selB, globalOpacity, dgmRange, dgmExag, chkFeat].forEach(el=>{
       el && el.addEventListener('focus', ()=> sheet.classList.add('open'), {once:true});
     });
   } else {
