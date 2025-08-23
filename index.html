@@ -62,8 +62,7 @@
     }
   </style>
 
-  <!-- qgis2web-GeoJSON: Dateiname ggf. anpassen; falls nicht vorhanden, wird das abgefangen -->
-  <script src="data/BRB_denkmalbb_bodendenkmalflchen_1.js" defer onerror="console.warn('GeoJSON-Datei fehlt: data/BRB_denkmalbb_bodendenkmalflchen_1.js')"></script>
+  <!-- GeoJSON wird unten robust geladen (lange + kurze Pfadvariante) -->
 </head>
 <body>
   <div id="map"></div>
@@ -116,7 +115,7 @@
   </div>
 
 <script>
-/* ========= Feste WMS-Layernamen (ohne GetCapabilities → CORS-frei) ========= */
+/* ========= WMS-Layer (feste Namen, keine GetCapabilities) ========= */
 const WMS = [
   { n: "1953 (DOP)", u: "https://isk.geobasis-bb.de/mapproxy/dop100g_1953/service/wms?", layer: "bb_dop100g_1953" },
   { n: "1992-1997 (Grau)", u: "https://isk.geobasis-bb.de/mapproxy/dop50g_1992_1997/service/wms?", layer: "bb_dop50g_1992_1997" },
@@ -133,16 +132,20 @@ const WMS = [
   { n: "DTK 10.000-1986-2000", u: "https://isk.geobasis-bb.de/mapproxy/dtk10_1986_2000_farbe/service/wms?", layer: "bb_dtk10_1986-2000_farbe" }
 ];
 
-/* ========= Karte ========= */
+/* ========= Karte & Panes ========= */
 const map = L.map('map', { zoomControl:true }).setView([52.5,13.3], 8);
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {maxZoom:19, attribution:'© OpenStreetMap-Mitwirkende'}).addTo(map);
 
-/* Panes */
 map.createPane('overlayA'); map.getPane('overlayA').style.zIndex = 350;
 map.createPane('overlayB'); map.getPane('overlayB').style.zIndex = 360;
 map.createPane('dgmPane');  map.getPane('dgmPane').style.zIndex  = 500;
 
-/* UI-Refs */
+/* *** NEU: oberstes Pane für Bodendenkmale *** */
+map.createPane('featPane');
+map.getPane('featPane').style.zIndex = 650;   // oberster Layer
+map.getPane('featPane').style.pointerEvents = 'auto';
+
+/* ========= UI-Refs ========= */
 const selA = document.getElementById('selA');
 const selB = document.getElementById('selB');
 const globalOpacity = document.getElementById('globalOpacity');
@@ -152,7 +155,6 @@ const dgmExag = document.getElementById('dgmExag');
 const dgmExagVal = document.getElementById('dgmExagVal');
 const chkFeat = document.getElementById('chkFeat');
 
-/* Sheet/FAB */
 const sheet = document.getElementById('sheet');
 const fabBtn = document.getElementById('fabBtn');
 const sheetGrab = document.getElementById('sheetGrab');
@@ -160,12 +162,12 @@ const toggleSheet = () => sheet.classList.toggle('open');
 fabBtn.addEventListener('click', toggleSheet);
 sheetGrab.addEventListener('click', toggleSheet);
 
-/* Cache nur für geladene WMS; wir halten max. 2 (A, B) gleichzeitig im DOM */
+/* ========= Cache & Layer-Refs ========= */
 const cache = Object.create(null);   // name -> L.TileLayer.WMS
 let dgmLayer = null;
 let featLayer = null;
 
-/* ===== Feature-Layer (GeoJSON) – optional, darf fehlen ===== */
+/* ========= Bodendenkmale (GeoJSON) – robustes Laden & ganz oben ========= */
 function styleFeat() { return { color:'rgba(255,195,0,1.0)', weight:1, opacity:1, fillOpacity:0 }; }
 function popFeat(feature, layer) {
   const p = (feature && feature.properties) || {};
@@ -174,60 +176,68 @@ function popFeat(feature, layer) {
   html += '</table>';
   layer.bindPopup(html, {maxHeight:400});
 }
-window.addEventListener('load', () => {
-  try {
-    if (typeof json_BRB_denkmalbb_bodendenkmalflchen_1 !== 'undefined') {
-      featLayer = L.geoJSON(json_BRB_denkmalbb_bodendenkmalflchen_1, { style: styleFeat, onEachFeature: popFeat, pane:'overlayA' }).addTo(map);
-      try { map.fitBounds(featLayer.getBounds(), { padding:[20,20] }); } catch(e) {}
-    } else {
-      console.warn('GeoJSON-Variable nicht gefunden – prüfe data/-Pfad.');
-    }
-  } catch (e) { console.warn('Feature-Layer Fehler:', e); }
-});
 
-/* Checkbox Feature-Layer */
+/* Versuch 1: langer Pfad, Versuch 2: kurzer Pfad */
+(function loadBodenDenkmale(){
+  const paths = [
+    "qgis2web_2025_08_16-08_27_08_518422/data/BRB_denkmalbb_bodendenkmalflchen_1.js",
+    "data/BRB_denkmalbb_bodendenkmalflchen_1.js"
+  ];
+  let idx = 0;
+  function tryNext(){
+    if (idx >= paths.length) { console.warn("GeoJSON-Datei nicht gefunden (beide Pfade versucht)."); return; }
+    const s = document.createElement('script');
+    s.src = paths[idx++];
+    s.defer = true;
+    s.onerror = tryNext;
+    s.onload = initFeatLayer;
+    document.head.appendChild(s);
+  }
+  function initFeatLayer(){
+    try {
+      if (typeof json_BRB_denkmalbb_bodendenkmalflchen_1 !== 'undefined') {
+        featLayer = L.geoJSON(json_BRB_denkmalbb_bodendenkmalflchen_1, { style: styleFeat, onEachFeature: popFeat, pane:'featPane' }).addTo(map);
+        try { map.fitBounds(featLayer.getBounds(), { padding:[20,20] }); } catch(e) {}
+      } else {
+        console.warn('GeoJSON-Variable nicht gefunden – prüfe Dateiinhalt.');
+      }
+    } catch(e) { console.warn('Feature-Layer Fehler:', e); }
+  }
+  tryNext();
+})();
+
+/* Toggle */
 chkFeat.addEventListener('change', () => {
   if (!featLayer) return;
   if (chkFeat.checked) featLayer.addTo(map); else map.removeLayer(featLayer);
 });
 
-/* ===== DGM laden (einmalig) ===== */
+/* ========= DGM (Deckkraft + „Überhöhung“ per Filter) ========= */
 (function initDGM(){
   const svc = { u: "https://isk.geobasis-bb.de/mapproxy/dgm/service/wms?", layer: "dgm" };
   dgmLayer = L.tileLayer.wms(svc.u, {
     layers: svc.layer, format:'image/png', transparent:true,
     opacity: parseFloat(dgmRange.value)||0, pane:'dgmPane',
     version:'1.1.1', crossOrigin:false
-  })
-  .addTo(map)
-  .on('tileerror', (e)=>console.warn('DGM tileerror', e));
+  }).addTo(map);
 })();
 function applyDgmLook() {
-  // Opazität
   const t = parseFloat(dgmRange.value);
   dgmVal.textContent = Math.round(t*100) + '%';
   if (dgmLayer && dgmLayer.setOpacity) dgmLayer.setOpacity(t);
 
-  // „Überhöhung“ (optisch): Kontrast ↑, Helligkeit ↓
-  // k=1 → neutral (contrast(1) brightness(1))
-  // k=3 → deutlich betont; Feintuning: contrast 1 + 0.35*(k-1), brightness 1 - 0.07*(k-1)
-  const k = parseFloat(dgmExag.value);
+  const k = parseFloat(dgmExag.value);               // 1..5
   dgmExagVal.textContent = '×' + k.toFixed(1);
-  const contrast = (1 + 0.35*(k-1)).toFixed(3);
-  const brightness = Math.max(0.5, (1 - 0.07*(k-1))).toFixed(3);
+  const contrast = (1 + 0.35*(k-1)).toFixed(3);      // mehr „Relief“
+  const brightness = Math.max(0.5, (1 - 0.07*(k-1))).toFixed(3); // leicht abdunkeln
   const pane = map.getPane('dgmPane');
-  if (pane) {
-    pane.style.filter = `contrast(${contrast}) brightness(${brightness})`;
-  }
+  if (pane) pane.style.filter = `contrast(${contrast}) brightness(${brightness})`;
 }
 dgmRange.addEventListener('input', applyDgmLook);
 dgmExag.addEventListener('input', applyDgmLook);
 
-/* ===== Dropdowns – sofort befüllen (keine Netz-Abhängigkeit) ===== */
-function addOption(select, name) {
-  const opt = document.createElement('option'); opt.value = name; opt.textContent = name;
-  select.appendChild(opt);
-}
+/* ========= Dropdowns ========= */
+function addOption(select, name) { const o = document.createElement('option'); o.value = name; o.textContent = name; select.appendChild(o); }
 function fillSelects() {
   const names = WMS.map(x => x.n);
   function setup(select) {
@@ -238,88 +248,59 @@ function fillSelects() {
   setup(selA); setup(selB);
 }
 
-/* ===== Hilfen ===== */
+/* ========= Hilfen ========= */
 function getServiceByName(name) { return WMS.find(x => x.n === name) || null; }
 function loadWms(name, pane) {
   const svc = getServiceByName(name);
   if (!svc) return null;
   if (cache[name]) {
-    // ins gewünschte Pane heben, falls nötig
     const t = cache[name];
-    if (t.options.pane !== pane) {
-      t.options.pane = pane;
-      if (map.hasLayer(t)) t.remove();
-      t.addTo(map);
-    } else if (!map.hasLayer(t)) {
-      t.addTo(map);
-    }
+    if (t.options.pane !== pane) { t.options.pane = pane; if (map.hasLayer(t)) t.remove(); t.addTo(map); }
+    else if (!map.hasLayer(t)) { t.addTo(map); }
     return t;
   }
-  const t = L.tileLayer.wms(svc.u, {
-    layers: svc.layer, format:'image/png', transparent:true, opacity:0, pane,
-    version:'1.1.1', crossOrigin:false
-  })
-  .on('tileerror', (e)=>console.warn('WMS tileerror', svc, e));
+  const t = L.tileLayer.wms(svc.u, { layers: svc.layer, format:'image/png', transparent:true, opacity:0, pane, version:'1.1.1', crossOrigin:false });
   t.addTo(map);
   cache[name] = t;
   return t;
 }
-function hideWms(name) {
-  const t = cache[name];
-  if (t && map.hasLayer(t)) t.remove();
-}
+function hideWms(name) { const t = cache[name]; if (t && map.hasLayer(t)) t.remove(); }
 
-/* ===== Nur A und B im DOM halten ===== */
+/* ========= Nur A und B aktiv ========= */
 function updateAandB() {
   const a = selA.value;
   const b = selB.value;
   const bAlpha = parseFloat(globalOpacity.value);
 
-  // A und B niemals identisch – wenn doch, B auf 'kein'
-  if (a && b && a !== '__none__' && a === b) { selB.value = '__none__'; }
+  if (a && b && a !== '__none__' && a === b) selB.value = '__none__';
 
-  // Alle gecachten Layer außer aktuelle A/B ausblenden
-  Object.keys(cache).forEach(name => {
-    if (name !== selA.value && name !== selB.value) hideWms(name);
-  });
+  Object.keys(cache).forEach(name => { if (name !== selA.value && name !== selB.value) hideWms(name); });
 
-  // A laden (100 %)
-  if (a && a !== '__none__') {
-    const la = loadWms(a, 'overlayA');
-    if (la && la.setOpacity) la.setOpacity(1);
-  }
-
-  // B laden (per Slider)
-  if (selB.value && selB.value !== '__none__') {
-    const lb = loadWms(selB.value, 'overlayB');
-    if (lb && lb.setOpacity) lb.setOpacity(isNaN(bAlpha)?0.6:bAlpha);
-  }
+  if (a && a !== '__none__') { const la = loadWms(a, 'overlayA'); if (la && la.setOpacity) la.setOpacity(1); }
+  if (selB.value && selB.value !== '__none__') { const lb = loadWms(selB.value, 'overlayB'); if (lb && lb.setOpacity) lb.setOpacity(isNaN(bAlpha)?0.6:bAlpha); }
 }
 
-/* ===== Events ===== */
+/* ========= Events & Init ========= */
 selA.addEventListener('change', updateAandB);
 selB.addEventListener('change', updateAandB);
 globalOpacity.addEventListener('input', () => {
-  const b = selB.value;
-  const t = cache[b];
-  const a = parseFloat(globalOpacity.value);
+  const b = selB.value, t = cache[b], a = parseFloat(globalOpacity.value);
   if (t && t.setOpacity) t.setOpacity(isNaN(a)?0.6:a);
 });
 
-/* ===== Init ===== */
 (function init(){
   fillSelects();
 
-  // Defaults (nur Auswahl setzen – Laden macht updateAandB)
-  const defA = "DOP20 2019–2021 (Grau)";       // sehr guter Kontrast unter DGM
+  // Startauswahl
+  const defA = "DOP20 2019–2021 (Grau)";
   const defB = "2016-2018";
   if ([...selA.options].some(o => o.value===defA)) selA.value = defA;
   if ([...selB.options].some(o => o.value===defB)) selB.value = defB;
 
-  applyDgmLook();   // DGM: Opazität + Überhöhungsfilter initial anwenden
-  updateAandB();    // lädt genau 2 Layer: A & B
+  applyDgmLook();   // DGM initial (Deckkraft + „Überhöhung“)
+  updateAandB();    // lädt genau A & B
 
-  // Mobile UX: Sheet bei erstem Fokus öffnen
+  // Mobile UX
   const isNarrow = window.matchMedia('(max-width: 820px)').matches;
   if (isNarrow) {
     [selA, selB, globalOpacity, dgmRange, dgmExag, chkFeat].forEach(el=>{
